@@ -1,0 +1,283 @@
+---
+title: "Socioeconomic Differences in Age at First Childbirth: Evidence from NHANES 2009-2012"
+author: "Bradley Bobbett"
+format: pdf
+editor: visual
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(message = FALSE, warning = FALSE)
+```
+
+------------------------------------------------------------------------
+
+## Motivation for the Study
+
+Household income may influence the age at which women first give birth. Prior research suggests that earlier age at first childbirth is associated with increased risk of poverty, while later childbearing is more common among individuals with greater financial stability (Moore & Caldwell, 1993). Several mechanisms may contribute to this relationship, including reduced opportunities for higher education and career advancement among those who become parents at younger ages. Economic evidence also indicates that earlier first births are associated with long-term reductions in women’s labor income, consistent with disruptions to early career development and educational attainment (Leung et al., 2016; Doren, 2019). Additionally, socioeconomic disadvantage is a well-established risk factor for early childbearing, suggesting that the timing of parenthood is socially patterned across income groups (Font, 2019). This study examines whether these relationships are present in the NHANES dataset.
+
+## Research Question and Hypothesis
+
+This study examines whether household income is associated with the age at which women have their first child. Specifically, it evaluates whether mean age at first childbirth differs across NHANES household income categories. Based on prior research linking earlier childbearing with economic disadvantage, it was hypothesized that there is a statistically significant difference in mean age at first childbirth across income groups, with lower-income individuals having their first child at a younger age than those in higher-income groups. As a sensitivity analysis, this relationship is also evaluated using poverty status and multivariable models to assess whether the observed association persists after accounting for relevant demographic and socioeconomic factors.
+
+## Data Description and Exploratory Data Analysis
+
+The analyzed data were collected by the U.S. National Center for Health Statistics (NCHS) as part of the National Health and Nutrition Examination Survey (NHANES) from 2009 to 2012. The dataset includes 10,000 observations measuring 76 variables.
+
+To answer the research question, the following variables were analyzed:
+
+***Age1stBaby*****:** Numeric age at first live birth, reported for female participants aged 20 years and older. Ages 14 years or younger are top-coded as "14", and 45 years or older top-coded as "45".
+
+***IncomeLevel*****:** Categorical variable with four ordered levels ("Lowest", "Lower-middle", "Upper-middle", and "Highest"). Derived from *HHIncomeMid*, a numeric midpoint of NHANES household income in U.S. dollars. Values greater than \$100,000 are top-coded as "100000."
+
+***Poverty*****:** Numeric ratio of family income to poverty guidelines, with smaller numbers indicating greater poverty. The maximum reported value is 5.
+
+First, the *IncomeLevel* variable is created by collapsing NHANES *HHIncomeMid* values into four ordered income categories for analytic simplicity. Next, rows with missing *Age1stBaby,* leaving 1,884 participants. Finally, observations missing *IncomeLevel* or *Poverty* values were excluded.
+
+```{r}
+library(NHANES)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(ggprism)
+library(knitr)
+library(mosaic)
+library(car)
+library(rstatix)
+library(parameters)
+
+# Load NHANES data
+nhanes <- NHANES
+
+# Create ordered household income categories based on HHIncomeMid
+nhanes <- nhanes %>%
+  mutate(IncomeLevel = case_when(
+    HHIncomeMid < 25000 ~ "Lowest",
+    between(HHIncomeMid, 25000, 49999) ~ "Lower-middle",
+    between(HHIncomeMid, 50000, 74999) ~ "Upper-middle",
+    HHIncomeMid >= 75000 ~ "Highest"
+  ))
+
+nhanes$IncomeLevel <- factor(
+  nhanes$IncomeLevel,
+  levels = c("Lowest", "Lower-middle", "Upper-middle", "Highest"),
+  ordered = TRUE)
+
+# Filter for women with non-missing age at first childbirth
+nhanes_mothers <- nhanes %>%
+  drop_na(Age1stBaby)
+
+nrow(nhanes_mothers)
+
+# Drop remining rows missing income and poverty ratio
+nhanes_mothers <- nhanes_mothers %>%
+  drop_na(IncomeLevel, Poverty)
+
+nrow(nhanes_mothers)
+```
+
+After excluding missing values for three variables of interest, the final analytic sample size was n = 1,741. The primary outcome variable is *Age1stBaby*, and the primary predictor variable is *IncomeLevel*. Poverty ratio (*Poverty*) is evaluated as a secondary predictor in a sensitivity analysis. Age at first childbirth is treated as a continuous numeric variable, while income group is treated as an ordinal categorical variable.
+
+Descriptive statistics are first summarized across income groups to evaluate differences in central tendency and spread.
+
+```{r}
+# Summary statistics by income group
+age_summary <- favstats(Age1stBaby ~ IncomeLevel, data = nhanes_mothers)
+knitr::kable(age_summary, digits = 2)
+```
+
+Across the full analytic sample, age at first childbirth ranged from 14 to 39 years. Clear differences in central tendency were observed across income groups. The Lowest income group had the youngest mean age at first childbirth (20.6 years) and a median of 20 years, while the Highest income group had the oldest mean (24.99 years) and median (24 years). The interquartile range also shifted upward with increasing income, from 18–23 years in the Lowest group to 21–29 years in the Highest group, suggesting later first childbirth among higher-income participants. Variability was similar across groups, with standard deviations ranging from 4.03 to 4.97 years, though the Highest income group showed greater spread.
+
+To further assess the distribution of age at first childbirth and evaluate group differences, a histogram and side-by-side boxplot were generated.
+
+```{r}
+# Inspect distribution of outcome variable with histogram
+ggplot(nhanes_mothers, aes(x = Age1stBaby)) +
+  geom_histogram(binwidth = 1, color = "gray20", fill = "gray75") +
+  scale_x_continuous(breaks = seq(10,45,5)) +
+  labs(
+    x = "Age (years)",
+    y = "Count",
+    title = "Distribution of age at first childbirth") +
+  theme_prism(base_size = 12)
+```
+
+The histogram shows a unimodal distribution of *Age1stBaby* with a right-skew. Observations are concentrated around age twenty, with a gradual right tail extending into the late thirties. Although this distribution departs from a strict bell-curve normal distribution, the analysis proceeds with raw age data since linear models are generally robust to moderate departures from normality, particularly with large samples.
+
+```{r}
+# Assess income group distributions with side-by-side boxplot
+ggplot(nhanes_mothers, aes(x=IncomeLevel, y=Age1stBaby, fill = IncomeLevel)) +
+  geom_boxplot() +
+  stat_summary(fun=mean, geom="point", shape=4, size=2, color="black") +
+  scale_y_continuous(breaks = seq(10,45,5)) +
+  scale_fill_brewer(palette = "Blues") +
+  guides(fill = "none") +
+  labs(x = "Income group",
+       y = "Age (years)",
+       title = "Age at first childbirth by household income group") +
+  theme_prism() +
+  theme(
+    plot.title = element_text(size = 13),
+    axis.title.x = element_text(size = 11),
+    axis.title.y = element_text(size = 11),
+    axis.text.x  = element_text(size = 9),
+    axis.text.y  = element_text(size = 9)
+  )
+```
+
+The side-by-side boxplot is consistent with the study hypothesis, showing a clear upward shift in age at first childbirth across increasing income categories. Median age increases steadily from the Lowest to Highest income groups, and group means (indicated by 'X' markers) follow the same pattern. The Highest income group also shows greater variability, with a wider interquartile range and longer upper whisker compared to lower-income groups. This suggests that later ages at first childbirth are more common in the sample and more dispersed among higher-income participants.
+
+```{r}
+# Plot age at first baby vs. poverty by income group
+ggplot(nhanes_mothers, aes(x = Poverty, y = Age1stBaby, color = IncomeLevel)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE, color = "black") +
+  scale_color_brewer(palette = "Blues", name = "Income group") +
+  labs(x = "Poverty ratio",
+       y = "Age at first childbirth",
+       title = "Age at first childbirth vs. poverty ratio") +
+  theme_prism(base_size = 12) +
+  theme(legend.title = element_text(size = 11))
+```
+
+Poverty ratio will be used as a second, continuous predictor variable for age at first childbirth. The scatterplot shows a similar trend to the boxplot, with age at first birth being positively correlated with poverty ratio. Plotting age at first child against poverty also shows concordance between the derived *IncomeLevel* categories and the NHANES *Poverty* variable. There is a clear color gradient from lowest to highest income group (bar a few outliers) with some overlap between groups.
+
+## Analysis
+
+First, an ANOVA framework was used to evaluate whether mean age at first childbirth differs across income groups. One-way ANOVA has three assumptions that must be met before use in analysis: independent observations, normality of residuals, and homogeneity of variance across groups. Given the NHANES sampling design, independence of observations was assumed for this analysis. The other two assumptions were assessed using diagnostic plots and formal statistical tests.
+
+```{r}
+# Fit one-way ANOVA to compare mean age across income groups
+anova <- aov(Age1stBaby ~ IncomeLevel, data = nhanes_mothers)
+
+# Generate diagnostic plots
+par(mfrow = c(1, 2))
+plot(anova, 1) # Residuals vs. fitted
+plot(anova, 2) # Normal Q-Q
+
+# Levene's test for homogeneity of variances
+levene_test <- leveneTest(Age1stBaby ~ IncomeLevel, data = nhanes_mothers)
+
+# Display results in a table
+levene_table <- as.data.frame(levene_test) %>%
+  tibble::rownames_to_column("Term") %>%
+  mutate(
+    `F value` = round(`F value`, 3),
+    `Pr(>F)`  = formatC(`Pr(>F)`, format = "e", digits = 3)
+  )
+kable(levene_table)
+```
+
+Visual inspection of the diagnostic plots suggests that the normality assumption is reasonably well-supported, with minor departures in the extreme tails. The Q–Q plot shows residuals closely tracking the reference line across most of the distribution, with noticeable deviation only among the most extreme positive residuals, indicating a right-tail departure consistent with the skew observed in the raw outcome data. Given the large sample size, inference based on group mean differences is still expected to be robust under the Central Limit Theorem.
+
+The residuals versus fitted plot shows the expected vertical banding pattern due to the discrete fitted values produced by a four-level categorical predictor, with no strong curvature in the mean structure. However, the spread of residuals appears slightly uneven across fitted values, suggesting potential heteroscedasticity. This concern is supported by Levene’s test, which was statistically significant (p \< 0.05), indicating unequal variances across income groups. To provide a more variance-robust assessment of group mean differences, Welch’s ANOVA was used as the primary inferential test.
+
+```{r}
+# Conduct Welch's one-way ANOVA
+oneway.test(Age1stBaby ~ IncomeLevel, data = nhanes_mothers,
+                           var.equal = FALSE)
+```
+
+Welch’s one-way ANOVA indicated a statistically significant difference in mean age at first childbirth across household income groups (F(3, 930.76) = 83.76, p \< 2.2e−16). This provides strong evidence that age at first childbirth is not equal across income categories, supporting the hypothesis that household income level is associated with differences in reproductive timing. To further investigate pairwise differences across income groups, post-hoc analysis was performed using the Games-Howell test. The results were plotted with 95% confidence intervals for each pairwise comparison.
+
+```{r}
+# Conduct Games-Howell test for post-hoc comparisons
+gh_test <- games_howell_test(nhanes_mothers, Age1stBaby ~ IncomeLevel,
+                             conf.level = 0.95)
+
+# Create comparison column from group names for readability
+gh_test <- gh_test %>%
+  mutate(
+    comparison = paste(group2, "-", group1),
+    signif = p.adj < 0.05
+  )
+
+# Display results in a table
+gh_table <- gh_test %>%
+  select(comparison, estimate, conf.low, conf.high, p.adj, p.adj.signif) %>%
+  arrange(estimate) %>%
+  mutate(
+  estimate = round(estimate, 3),
+  conf.low = round(conf.low, 3),
+  conf.high = round(conf.high, 3),
+  p.adj = formatC(p.adj, format = "e", digits = 3)
+)
+kable(gh_table)
+
+# Abbreviate labels for plot readability
+gh_test$comparison <- gsub("Lower middle", "Lower mid", gh_test$comparison)
+gh_test$comparison <- gsub("Upper middle", "Upper mid", gh_test$comparison)
+
+# Plot pairwise differences with 95% confidence intervals
+ggplot(gh_test, aes(x = estimate, y = reorder(comparison, estimate))) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "gray80") +
+  geom_errorbarh(aes(xmin = conf.low, xmax = conf.high), height = 0.2, color = "gray40") +
+  geom_point(aes(color = signif), size = 2) +
+  scale_color_manual(values = c("FALSE" = "gray80", "TRUE" = "#08519c"), guide = "none") +
+  labs(
+    x = "Difference in mean age at first birth (years)",
+    y = "Income groups compared",
+    title = "Games–Howell pairwise differences\nwith 95% confidence intervals"
+  ) +
+  theme_prism() +
+  theme(
+    plot.title = element_text(size = 13),
+    axis.title.x = element_text(size = 11),
+    axis.title.y = element_text(size = 11),
+    axis.text.x  = element_text(size = 9),
+    axis.text.y  = element_text(size = 9),
+    plot.margin = margin(10, 10, 10, 10)
+  )
+```
+
+Post-hoc pairwise comparisons indicate a clear, monotonic increase in age at first childbirth with increasing household income. All six income group comparisons were statistically significant after adjustment (p \< 0.001), with confidence intervals that do not cross zero, confirming meaningful differences in mean age between every group. Women in the lower-middle income group had a significantly higher mean age at first childbirth than the lowest income group (mean difference = 1.057 years, 95% CI: 0.321–1.794). This pattern continued across income strata, with the upper-middle group averaging 2.349 years older than the lowest group (95% CI: 1.545–3.154) and 1.292 years older than the lower-middle group (95% CI: 0.481–2.104). The largest differences were observed in comparisons involving the highest income group, which showed substantially later mean age at first childbirth relative to the upper-middle (difference = 2.039 years, 95% CI: 1.219–2.859), lower-middle (difference = 3.331 years, 95% CI: 2.578–4.085), and lowest income groups (difference = 4.388 years, 95% CI: 3.643–5.134). These results demonstrate a consistent income-related pattern, where higher income is consistently associated with later age at first childbirth.
+
+Next, a linear regression model was applied to assess the relationship between age at first childbirth and socioeconomic status using the NHANES *Poverty* variable. Poverty is reported as a ratio of household income relative to federal poverty guidelines, allowing evaluation of whether age at first childbirth varies continuously according to socioeconomic conditions rather than between predefined income categories. The linear relationship between the variables was first visualized in a scatterplot.
+
+```{r}
+# Scatterplot of Age1stBaby vs. Poverty
+ggplot(nhanes_mothers, aes(x = Poverty, y = Age1stBaby)) +
+  geom_jitter(width = 0.05, alpha = 0.3, size = 2, color = "gray25") +
+  geom_smooth(method = "lm", se = TRUE, color = "#08519c", fill = "#9ecae1",
+              linewidth = 1.2) +
+  scale_x_continuous(breaks = seq(0, 5, 1)) +
+  scale_y_continuous(breaks = seq(10, 45, 5)) +
+  labs(x = "Poverty ratio",
+       y = "Age at first birth") +
+  theme_prism(base_size = 12)
+```
+
+The scatterplot shows a modest positive association between poverty ratio and age at first childbirth, with higher poverty ratios (indicating less poverty) corresponding to later ages at first birth. Although there is substantial variability at all levels of poverty, the fitted regression line suggests a consistent upward trend across the range of values. The vertical clustering of observations at a poverty ratio of 5 reflects top-coding in the NHANES data, where values at or above this threshold are capped, resulting in the visible concentration of points at the upper limit. The data were fitted to a linear regression model to assess the significance of the relationship.
+
+```{r}
+# Model 1: simple regression 
+lm_simple <- lm(Age1stBaby ~ Poverty, data = nhanes_mothers)
+model_parameters(lm_simple,  include_info = TRUE)
+```
+
+The simple linear model was statistically significant overall (F(1, 1739) = 238.73, p \< .001) and explained 12% of the variance in age at first childbirth (adjusted R² = 0.120), indicating a weak association. The residual standard error was 4.51, suggesting that typical prediction error around the fitted line is approximately ±4.5 years. The estimated intercept of 19.85 represents the expected age at first childbirth when the poverty ratio is zero, corresponding to households at the federal poverty threshold. The slope for *Poverty* was positive and statistically significant (beta = 1.02, 95% CI \[0.89, 1.15\], p \< .001), indicating that for each one-unit increase in poverty ratio, age at first childbirth increases by approximately one year on average.
+
+To account for additional socioeconomic factors that may influence age at first childbirth, a multiple linear regression model was also fitted, including the categorical variables *Race1* and *Education* as predictors alongside *Poverty.*
+
+```{r}
+# Model 2: multiple regression (add race + education)
+lm_multi <- lm(Age1stBaby ~ Poverty + Race1 + Education, data = nhanes_mothers)
+model_parameters(lm_multi,  include_info = TRUE)
+```
+
+The overall model was statistically significant and explained approximately 32% of the variance in age at first childbirth (R² = 0.322; adjusted R² = 0.319), representing a substantial improvement over the simple model. The residual standard error was 3.97 years, indicating reduced unexplained variability compared to the poverty-only model. After adjustment, poverty remained a statistically significant positive predictor (beta = 0.35, 95% CI \[0.22, 0.49\], p \< .001), though its effect size was attenuated relative to the simple regression. Several race/ethnicity categories were associated with significantly higher age at first childbirth relative to the reference group, and higher educational attainment—particularly college graduation—was strongly associated with later age at first childbirth (beta = 5.79, 95% CI \[4.79, 6.79\], p \< .001). These findings indicate that education and race/ethnicity contribute meaningfully to variation in age at first childbirth and account for part of the association observed with poverty ratio alone.
+
+## Conclusions
+
+This analysis demonstrates a clear and statistically significant association between household income and age at first childbirth in the NHANES sample. Both categorical income comparisons and continuous poverty ratio modeling indicate that higher socioeconomic status is associated with later reproductive timing. While the simple regression model showed a modest association, adjustment for race/ethnicity and educational attainment substantially increased explanatory power and attenuated the poverty effect, suggesting that multiple socioeconomic factors jointly contribute to variation in age at first childbirth. These findings reinforce the socially patterned nature of reproductive timing and highlight the importance of considering both economic and demographic characteristics when examining disparities in early life-course outcomes.
+
+## References
+
+Doren, C. (2019). Which Mothers Pay a Higher Price? Education Differences in Motherhood Wage Penalties by Parity and Fertility Timing. *Sociological science*, *6*, 684–709. https://doi.org/10.15195/v6.a26
+
+Font, S. A., Cancian, M., & Berger, L. M. (2019). Prevalence and Risk Factors for Early Motherhood Among Low-Income, Maltreated, and Foster Youth. *Demography*, *56*(1), 261–284. https://doi.org/10.1007/s13524-018-0744-x
+
+Leung, M. Y., Groes, F., & Santaeulalia-Llopis, R. (2016). The Relationship between Age at First Birth and Mother's Lifetime Earnings: Evidence from Danish Data. *PloS one*, *11*(1), e0146989. https://doi.org/10.1371/journal.pone.0146989
+
+Moore, K. A., Myers, D. E., Morrison, D. R., Nord, C. W., Brown, B., & Edmonston, B. (1993). Age at first childbirth and later poverty. *Journal of research on adolescence : the official journal of the Society for Research on Adolescence*, *3*(4), 393--422. https://doi.org/10.1207/s15327795jra0304_5
